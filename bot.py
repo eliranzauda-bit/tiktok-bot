@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 import google.generativeai as genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -58,13 +59,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "🎯 *מה אני יכול לעשות:*\n\n"
-        "🎣 *Hooks* — טקסטים לפתיחת הסרטון (3 שניות ראשונות)\n"
+        "🎣 *Hooks* — טקסטים לפתיחת הסרטון\n"
         "🔥 *כותרות* — כותרות שמושכות צפיות\n"
         "✍️ *קפשין + האשטגים* — טקסט לפוסט + האשטגים\n"
         "💡 *רעיונות* — רעיונות לסרטונים חדשים\n"
         "🎵 *סאונדים* — סאונדים ויראליים עכשיו\n"
-        "📈 *טרנדים עכשיו* — מה בוער ברגע זה בטיקטוק\n\n"
-        "🌐 הבוט מחובר לגוגל בזמן אמת!\n\n"
+        "📈 *טרנדים עכשיו* — מה בוער ברגע זה\n\n"
         "פשוט לחץ על כפתור ותאר לי את הסרטון 🚀"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -79,12 +79,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_states[user_id] = {"mode": mode}
 
     prompts = {
-        "hooks": "🎣 *Hooks לפתיחת הסרטון*\n\nתאר לי את הסרטון שלך ואני אכתוב לך 5 hooks שיעצרו אנשים בסקרול:\n\n_לדוגמה: outfit check עם ג'קט שחור ונעלי Jordan_",
-        "titles": "🔥 *כותרות מושכות*\n\nתאר לי את הסרטון ואני אכתוב לך 5 כותרות שמביאות צפיות:\n\n_לדוגמה: unboxing נעליים נדירות שקניתי ב-2000₪_",
-        "caption": "✍️ *קפשין + האשטגים*\n\nתאר לי את הסרטון ואני אכתוב קפשין + 15 האשטגים מנוצחים:\n\n_לדוגמה: haul של בגדים חדשים מהחנות_",
-        "ideas": "💡 *רעיונות לסרטונים*\n\nתגיד לי נושא כללי ואני אתן לך 5 רעיונות ויראליים:\n\n_לדוגמה: streetwear, sneakers, rap outfits_",
-        "sounds": "🎵 *סאונדים ויראליים*\n\nתגיד לי מה הוייב של הסרטון ואני אחפש מה בוער עכשיו:\n\n_לדוגמה: outfit אגרסיבי, flex, chill streetwear_",
-        "trends": "📈 *טרנדים עכשיו*\n\nאני אחפש בגוגל מה בוער ברגע זה בטיקטוק.\n\nתגיד לי על מה אתה רוצה לדעת:\n\n_לדוגמה: streetwear, rap, sneakers_",
+        "hooks": "🎣 *Hooks לפתיחת הסרטון*\n\nתאר לי את הסרטון שלך:\n\n_לדוגמה: outfit check עם ג'קט שחור ונעלי Jordan_",
+        "titles": "🔥 *כותרות מושכות*\n\nתאר לי את הסרטון:\n\n_לדוגמה: unboxing נעליים נדירות_",
+        "caption": "✍️ *קפשין + האשטגים*\n\nתאר לי את הסרטון:\n\n_לדוגמה: haul של בגדים חדשים_",
+        "ideas": "💡 *רעיונות לסרטונים*\n\nתגיד לי נושא כללי:\n\n_לדוגמה: streetwear, sneakers_",
+        "sounds": "🎵 *סאונדים ויראליים*\n\nמה הוייב של הסרטון?\n\n_לדוגמה: outfit אגרסיבי, flex_",
+        "trends": "📈 *טרנדים עכשיו*\n\nעל מה אתה רוצה לדעת?\n\n_לדוגמה: streetwear, rap, sneakers_",
     }
 
     await query.edit_message_text(
@@ -105,12 +105,8 @@ async def back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def needs_web_search(mode: str) -> bool:
-    return mode in ("sounds", "trends")
-
-
-async def generate_content(mode: str, user_input: str) -> str:
-    use_search = needs_web_search(mode)
+def generate_content_sync(mode: str, user_input: str) -> str:
+    use_search = mode in ("sounds", "trends")
 
     if use_search:
         model = genai.GenerativeModel(
@@ -126,7 +122,7 @@ async def generate_content(mode: str, user_input: str) -> str:
 
     prompts = {
         "hooks": f"""צור 5 hooks שונים לטיקטוק לסרטון על: "{user_input}"
-הסרטון הוא בנישת streetwear / ראפ / היפ-הופ.
+נישת streetwear / ראפ / היפ-הופ.
 כל hook מקסימום 10 מילים, מסקרן, עוצר סקרול.
 פרמט:
 1. [hook]
@@ -136,8 +132,8 @@ async def generate_content(mode: str, user_input: str) -> str:
 5. [hook]""",
 
         "titles": f"""צור 5 כותרות לסרטון טיקטוק על: "{user_input}"
-הסרטון הוא בנישת streetwear / ראפ.
-הכותרות צריכות להיות קצרות, מסקרנות, עם אמוג'י אם מתאים.
+נישת streetwear / ראפ.
+קצרות, מסקרנות, עם אמוג'י אם מתאים.
 פרמט:
 1. [כותרת]
 2. [כותרת]
@@ -147,31 +143,27 @@ async def generate_content(mode: str, user_input: str) -> str:
 
         "caption": f"""כתוב קפשין + האשטגים לסרטון טיקטוק על: "{user_input}"
 נישת streetwear / ראפ / היפ-הופ.
-
 קפשין: 2-3 שורות אנרגטיות עם קריאה לפעולה.
 ---
-15 האשטגים רלוונטיים - שלב גדולים וניש""",
+15 האשטגים רלוונטיים""",
 
         "ideas": f"""תן 5 רעיונות לסרטוני טיקטוק ויראליים בנושא: "{user_input}"
 נישת streetwear / ראפ / היפ-הופ.
-
 פרמט לכל רעיון:
-🎬 [שם הסרטון]
+🎬 [שם]
 📋 [תיאור קצר]
 🔥 [למה זה יתפוצץ]
 ---""",
 
-        "sounds": f"""חפש בגוגל אילו סאונדים ושירים ויראליים עכשיו בטיקטוק לנישת ראפ/היפ-הופ/streetwear.
-הוייב של הסרטון: "{user_input}"
-
-המלץ על 5 סאונדים אמיתיים שבוערים עכשיו:
+        "sounds": f"""חפש בגוגל אילו סאונדים ויראליים עכשיו בטיקטוק לנישת ראפ/היפ-הופ/streetwear.
+ויב הסרטון: "{user_input}"
+המלץ על 5 סאונדים שבוערים עכשיו:
 🎵 [שם השיר - אמן]
-📈 [למה הסאונד הזה עובד עכשיו]
+📈 [למה עובד עכשיו]
 ---""",
 
-        "trends": f"""חפש בגוגל מה הטרנדים הכי חמים עכשיו בטיקטוק בנושא: "{user_input}" בנישת streetwear/ראפ.
-
-תן דוח טרנדים עדכני:
+        "trends": f"""חפש בגוגל הטרנדים הכי חמים עכשיו בטיקטוק בנושא: "{user_input}" בנישת streetwear/ראפ.
+דוח טרנדים עדכני:
 📈 [שם הטרנד]
 📋 [תיאור + איך להצטרף]
 🎯 [רמת תחרות: נמוכה/בינונית/גבוהה]
@@ -180,6 +172,11 @@ async def generate_content(mode: str, user_input: str) -> str:
 
     response = model.generate_content(prompts[mode])
     return response.text
+
+
+async def generate_content(mode: str, user_input: str) -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_content_sync, mode, user_input)
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -207,8 +204,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "trends": "טרנדים עכשיו",
     }
 
-    search_modes = {"sounds", "trends"}
-    is_search = mode in search_modes
+    is_search = mode in {"sounds", "trends"}
     thinking_text = "🌐 מחפש בגוגל..." if is_search else f"⏳ מייצר {mode_names.get(mode, 'תוכן')}..."
     thinking_msg = await update.message.reply_text(thinking_text)
 
@@ -232,14 +228,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CallbackQueryHandler(back_handler, pattern="^back$"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
-    logger.info("Bot running with Gemini + Google Search!")
+    logger.info("Bot running!")
     app.run_polling(drop_pending_updates=True)
 
 
