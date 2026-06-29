@@ -1,6 +1,8 @@
 import os
 import logging
 import asyncio
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import httpx
 import google.generativeai as genai
 
@@ -10,6 +12,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+PORT = int(os.environ.get("PORT", 8080))
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -84,6 +87,24 @@ CONTENT_PROMPTS = {
 }
 
 
+# ── HTTP server so Render's health-check is satisfied ──────────────────────────
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+    def log_message(self, *args):
+        pass  # silence access logs
+
+
+def run_http_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    logger.info(f"Health-check server listening on port {PORT}")
+    server.serve_forever()
+
+
+# ── Telegram helpers ────────────────────────────────────────────────────────────
 async def tg(method: str, **kwargs):
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(f"{TELEGRAM_API}/{method}", json=kwargs)
@@ -108,12 +129,12 @@ async def answer_callback(callback_id):
     await tg("answerCallbackQuery", callback_query_id=callback_id)
 
 
+# ── Gemini content generation ───────────────────────────────────────────────────
 def generate_sync(mode: str, user_input: str) -> str:
     use_search = mode in ("sounds", "trends")
-    tools = "google_search" if use_search else None
     model = genai.GenerativeModel(
         model_name="gemini-2.0-flash",
-        tools=tools,
+        tools="google_search" if use_search else None,
         system_instruction=STREETWEAR_SYSTEM,
     )
     response = model.generate_content(CONTENT_PROMPTS[mode](user_input))
@@ -125,6 +146,7 @@ async def generate(mode: str, user_input: str) -> str:
     return await loop.run_in_executor(None, generate_sync, mode, user_input)
 
 
+# ── Update handler ──────────────────────────────────────────────────────────────
 async def handle_update(update: dict):
     if "message" in update:
         msg = update["message"]
@@ -143,7 +165,7 @@ async def handle_update(update: dict):
         if text == "/help":
             await send_message(
                 chat_id,
-                "🎯 *מה אני יכול לעשות:*\n\n🎣 *Hooks* — טקסטים לפתיחת הסרטון\n🔥 *כותרות* — כותרות שמושכות צפיות\n✍️ *קפשין + האשטגים* — טקסט לפוסט\n💡 *רעיונות* — רעיונות לסרטונים חדשים\n🎵 *סאונדים* — סאונדים ויראליים עכשיו\n📈 *טרנדים* — מה בוער ברגע זה\n\nפשוט לחץ כפתור ותאר לי את הסרטון 🚀",
+                "🎯 *מה אני יכול לעשות:*\n\n🎣 *Hooks* — טקסטים לפתיחת הסרטון\n🔥 *כותרות* — כותרות שמושכות צפיות\n✍️ *קפשין + האשטגים*\n💡 *רעיונות* — רעיונות חדשים\n🎵 *סאונדים* — סאונדים ויראליים\n📈 *טרנדים* — מה בוער עכשיו\n\nפשוט לחץ כפתור ותאר את הסרטון 🚀",
                 reply_markup=KEYBOARDS["main"]
             )
             return
@@ -169,7 +191,7 @@ async def handle_update(update: dict):
                 reply_markup=KEYBOARDS["main"]
             )
         except Exception as e:
-            logger.error(f"Error: {e}")
+            logger.error(f"Error generating content: {e}")
             await edit_message(chat_id, msg_id, "❌ הייתה שגיאה. נסה שוב.", reply_markup=KEYBOARDS["main"])
 
     elif "callback_query" in update:
@@ -189,9 +211,10 @@ async def handle_update(update: dict):
             await edit_message(chat_id, msg_id, MODE_PROMPTS[data], reply_markup=KEYBOARDS["back"])
 
 
+# ── Polling loop ────────────────────────────────────────────────────────────────
 async def poll():
     offset = 0
-    logger.info("Bot started polling!")
+    logger.info("✅ Bot started polling!")
     while True:
         try:
             async with httpx.AsyncClient(timeout=35) as client:
@@ -209,5 +232,11 @@ async def poll():
             await asyncio.sleep(3)
 
 
+# ── Entry point ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Start HTTP health-check server in background thread
+    t = threading.Thread(target=run_http_server, daemon=True)
+    t.start()
+
+    # Start Telegram polling in main async loop
     asyncio.run(poll())
